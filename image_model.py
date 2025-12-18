@@ -2,6 +2,7 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 class HDCClassifier(nn.Module):
     def __init__(self, n_classes: int, dimension: int = 5000, similarity_threshold: float = 0.0):
@@ -140,14 +141,14 @@ class CNNExtractor(nn.Module):
         return features
 
 class HDCImageClassifier(nn.Module):
-    def __init__(self, input_size: Tuple[int, int, int], feature_dim: int = 512, hd_dim: int = 5000, n_classes: int = 10):
+    def __init__(self, input_channels: int = 3, feature_dim: int = 512, hd_dim: int = 5000, n_classes: int = 10):
         super().__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.feature_dim = feature_dim
         self.hd_dim = hd_dim
         self.n_classes = n_classes
         self.feature_extractor = CNNExtractor(
-            input_channels=input_size[0],
+            input_channels=input_channels,
             feature_dim=feature_dim,
         ).to(self.device)
         self.hdc = HDCClassifier(
@@ -155,8 +156,9 @@ class HDCImageClassifier(nn.Module):
             n_classes=n_classes
         ).to(self.device)
 
-    def setup_cnn(self, model_path: str):
+    def init_cnn(self, model_path: str):
         self.feature_extractor.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.feature_extractor.eval()
         print(f"Loaded CNN from {model_path}")
 
     def train_hdc(self, train_loader: torch.utils.data.DataLoader, n_epochs: int = 1):
@@ -185,6 +187,7 @@ class HDCImageClassifier(nn.Module):
         return accuracies
     
     def train_hdc_iterative(self, train_loader: torch.utils.data.DataLoader, n_iters: int = 3):
+        """Retrains the model for n_iters"""
         self.feature_extractor.eval()
         
         all_features, all_labels = [], []
@@ -275,3 +278,32 @@ class HDCImageClassifier(nn.Module):
             'predictions': predictions_tensor.numpy(),
             'similarities': similarities_tensor.numpy()
         }
+    
+    def prune_metrics(self, dim: int, data: DataLoader):
+        """
+        diffs[0] is average global distance, diffs[1-n_classes+1] are average label distances per class
+        avgs[0-n_classes] are average hypervector per class
+        """
+        for (inputs, labels) in data:
+            pass
+
+    def hd_prune(self, data: DataLoader) -> int:
+        ref_diffs, ref_avgs = self.prune_metrics(self.hd_dim, data)
+
+        high = self.hd_dim
+        low = 1
+        res = self.hd_dim
+        while high > low:
+            valid = True
+            mid = low + (high - low) // 2
+
+            diffs, avgs = self.prune_metrics(mid, data)
+
+            if valid:
+                low = mid + 1
+                if res > mid:
+                    res = mid
+            else:
+                high = mid
+
+        return res
