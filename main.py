@@ -7,10 +7,12 @@ from torch.utils.data import Dataset, DataLoader
 
 from image_model import CNNExtractor, HDCImageClassifier
 
-def train_mnist():
-    data_dir = "./data"
-    cnn_path = "./models/cnn_mnist.pth"
-    hdc_path = "./models/hdc_mnist.pth"
+data_dir = "./data"
+cnn_path = "./models/cnn_mnist.pth"
+hdc_path = "./models/hdc_mnist.pth"
+new_hdc_path = "./models/hdc_mnist_pruned.pth"
+
+def train_mnist_cnn():
     learning_rate = 0.001
     epochs = 10
     batch_size = 64
@@ -45,10 +47,21 @@ def train_mnist():
 
     torch.save(cnn.state_dict(), cnn_path)
 
+def train_mnist_hdc():
+    batch_size = 64
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,))
+    ])
+
+    train_dataset: Dataset = torchvision.datasets.MNIST(root=data_dir, train=True, download=True, transform=transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+
     hdc = HDCImageClassifier(input_channels=1)
     hdc.init_cnn(cnn_path)
 
-    accs = hdc.train_hdc_iterative(train_dataset)
+    accs = hdc.train_hdc_iterative(train_loader)
 
     print(f"Model saved with accuracy {accs} in {hdc_path}")
     torch.save(hdc.state_dict(), hdc_path)
@@ -59,10 +72,6 @@ def prune_mnist():
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-
-    data_dir = "./data"
-    hdc_path = "./models/hdc_mnist.pth"
-    new_hdc_path = "./models/hdc_mnist_pruned.pth"
 
     hdc = HDCImageClassifier(input_channels=1)
     hdc.load_state_dict(torch.load(hdc_path))
@@ -77,8 +86,9 @@ def prune_mnist():
     torch.save(hdc.state_dict(), new_hdc_path)
 
 def main():
-    train_mnist()
-    # prune_mnist()
+    # train_mnist_cnn()
+    # train_mnist_hdc()
+    prune_mnist()
 
 if __name__=="__main__":
     main()
