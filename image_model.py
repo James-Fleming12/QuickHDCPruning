@@ -366,7 +366,6 @@ class HDCImageClassifier(nn.Module):
         features_dataloader = torch.utils.data.DataLoader(features_dataset, batch_size=data.batch_size, num_workers=0)
 
         ref_diffs, ref_avgs = self.prune_metrics(self.hd_dim, features_dataloader)
-        print(f"got ref_diffs with shape {ref_diffs.shape} and ref_avgs with shape {ref_avgs.shape}")
 
         high = self.hd_dim
         low = 1
