@@ -375,7 +375,19 @@ class HDCImageClassifier(nn.Module):
             mid = low + (high - low) // 2
 
             diffs, avgs = self.prune_metrics(mid, features_dataloader)
+            print(diffs)
 
+            for i in range(self.n_classes):
+                if diffs[i+1] < diffs[0]: # global distance comparisons (maybe include additional noise term?)
+                    valid = False
+
+                for j in range(self.n_classes):
+                    if i == j: continue
+                    if self.hdc.hamming_dist(avgs[i].to(torch.bool), avgs[j].to(torch.bool)) > diffs[i+1]:
+                        valid = False
+
+            print(f"Dimesion {mid} checked: {"Valid" if valid else "Invalid"}")
+            
             if valid:
                 high = mid
                 if res > mid:
