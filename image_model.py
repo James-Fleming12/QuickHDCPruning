@@ -11,14 +11,13 @@ class HDCClassifier(nn.Module):
         self.dim = dimension
         self.n_classes = n_classes
         
-        self.prototypes = torch.zeros(n_classes, dimension, dtype=torch.bool, device=self.device)
-        self.prototype_accum = torch.zeros(n_classes, self.dim, dtype=torch.int32, device=self.device)
-        self.class_counts = torch.zeros(n_classes, device=self.device)
-
-        self.feature_basis = None
+        self.register_buffer('prototypes', torch.zeros(n_classes, dimension, dtype=torch.bool, device=self.device))
+        self.register_buffer('prototype_accum', torch.zeros(n_classes, dimension, dtype=torch.int32, device=self.device))
+        self.register_buffer('class_counts', torch.zeros(n_classes, dtype=torch.long, device=self.device))
 
         self.similarity_thresh = similarity_threshold
 
+        self.feature_basis = None
         self.random_projection = None
 
     def initialize_basis_vectors(self, feature_dim:int) -> None:
@@ -65,7 +64,7 @@ class HDCClassifier(nn.Module):
     def finalize_prototypes(self):
         for c in range(self.n_classes):
             if self.class_counts[c] > 0:
-                self.prototypes[c] = self.prototype_accum[c] >= 0
+                self.prototypes[c] = self.prototype_accum[c] > 0
 
     def predict(self, features: torch.Tensor, similarity_thresh: float = 0.0) -> Tuple[torch.Tensor, torch.Tensor]:
         hypervectors = self.features_to_hypervector(features)
@@ -375,7 +374,6 @@ class HDCImageClassifier(nn.Module):
             mid = low + (high - low) // 2
 
             diffs, avgs = self.prune_metrics(mid, features_dataloader)
-            print(diffs)
 
             for i in range(self.n_classes):
                 if diffs[i+1] < diffs[0]: # global distance comparisons (maybe include additional noise term?)
@@ -386,8 +384,6 @@ class HDCImageClassifier(nn.Module):
                     if self.hdc.hamming_dist(avgs[i].to(torch.bool), avgs[j].to(torch.bool)) > diffs[i+1]:
                         valid = False
 
-            print(f"Dimesion {mid} checked: {"Valid" if valid else "Invalid"}")
-            
             if valid:
                 high = mid
                 if res > mid:
