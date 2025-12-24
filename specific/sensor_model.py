@@ -492,10 +492,6 @@ def train_har_extractor(dataset_type: str = 'ucihar'):
             best_val_loss = val_loss
             torch.save(model.state_dict(), model_save_path)
             print(f'Epoch {epoch+1}: Saved model with val loss {val_loss:.4f}, acc {val_acc:.2f}%')
-        
-        if (epoch + 1) % 10 == 0:
-            print(f'Epoch {epoch+1}: Train loss {train_loss/len(train_loader):.4f}, '
-                  f'Val loss {val_loss:.4f}, Val acc {val_acc:.2f}%')
 
 def train_har_hdc(dataset_type: str = 'ucihar', dim: int = 5000):
     """Train HDC model for HAR."""
