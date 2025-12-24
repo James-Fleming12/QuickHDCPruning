@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,7 +9,17 @@ from torch.utils.data import Dataset, DataLoader
 from image_model import CNNExtractor, HDCImageClassifier
 
 class HDCPruner(nn.Module):
-    def __init__(self, model: HDCImageClassifier):
+    def __init__(self, model):
+        """
+        model needs the following parameters
+        - self.device
+        - self.n_classes
+        - self.feature_dim
+        - self.hd_dim
+        - self.hdc.features_to_hypervector(inputs)
+        - self.feature_extractor(inputs, return_features=True)
+        - self.hdc.hamming_dist(input1, input2)
+        """
         super().__init__()
         self.model = model
 
@@ -16,9 +27,6 @@ class HDCPruner(nn.Module):
         self.n_classes = model.n_classes
         self.feature_dim = model.feature_dim
         self.hd_dim = model.hd_dim
-
-    def forward(self, x) -> int:
-        pass
 
     def prune_metrics(self, dim: int, data: DataLoader):
         """
@@ -95,7 +103,7 @@ class HDCPruner(nn.Module):
         with torch.no_grad():
             for images, labels in data:
                 images = images.to(self.device)
-                features = self.model.feature_extractor(images)
+                features = self.model.feature_extractor(images, return_features=True)
                 
                 all_features.append(features)
                 all_labels.append(labels)
@@ -134,6 +142,109 @@ class HDCPruner(nn.Module):
                 low = mid + 1
 
         return res
+
+class HDCClassifier(nn.Module):
+    def __init__(self, n_classes: int, dimension: int = 5000, similarity_threshold: float = 0.0):
+        super().__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.dim = dimension
+        self.n_classes = n_classes
+        
+        self.register_buffer('prototypes', torch.zeros(n_classes, dimension, dtype=torch.bool, device=self.device))
+        self.register_buffer('prototype_accum', torch.zeros(n_classes, dimension, dtype=torch.int32, device=self.device))
+        self.register_buffer('class_counts', torch.zeros(n_classes, dtype=torch.long, device=self.device))
+
+        self.similarity_thresh = similarity_threshold
+
+        self.feature_basis = None
+        self.random_projection = None
+
+    def initialize_basis_vectors(self, feature_dim:int) -> None:
+        self.feature_basis = torch.rand((feature_dim, self.dim), device=self.device) < 0.5
+
+    def bind(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return a ^ b
+
+    def bundle(self, x: torch.Tensor) -> torch.Tensor:
+        sum_bits = x.sum(dim=0, dtype=torch.float32)
+        threshold = x.shape[0] / 2
+        return sum_bits > threshold
+
+    def hamming_dist(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        differences = a^b
+        hamming_dist = differences.sum(dim=-1, dtype=torch.float32)
+
+        similarity = 1.0 - (hamming_dist / self.dim)
+        return similarity
+    
+    def initialize_projection(self, feature_dim: int):
+        self.random_projection = torch.randint(0, 2, (feature_dim, self.dim), device=self.device).float() * 2 - 1
+
+    def features_to_hypervector(self, features: torch.Tensor) -> torch.Tensor:
+        _, feature_dim = features.shape
+        if self.random_projection is None:
+            self.initialize_projection(feature_dim)
+
+        projected = features @ self.random_projection
+
+        hvs = projected > 0
+        return hvs.to(torch.bool)
+
+    def train(self, features: torch.Tensor, labels: torch.Tensor) -> None:
+        hypervectors = self.features_to_hypervector(features)
+        for i in range(len(labels)):
+            label = labels[i].item()
+            hv = hypervectors[i]
+            hv_signed = hv.float() * 2 - 1
+
+            self.prototype_accum[label] += hv_signed
+            self.class_counts[label] += 1
+
+    def finalize_prototypes(self):
+        for c in range(self.n_classes):
+            if self.class_counts[c] > 0:
+                self.prototypes[c] = self.prototype_accum[c] > 0
+
+    def predict(self, features: torch.Tensor, similarity_thresh: float = 0.0) -> Tuple[torch.Tensor, torch.Tensor]:
+        hypervectors = self.features_to_hypervector(features)
+        batch_size = hypervectors.shape[0]
+        
+        similarities = torch.zeros(batch_size, self.n_classes, device=self.device)
+        
+        for c in range(self.n_classes):
+            if self.class_counts[c] > 0:
+                proto_expanded = self.prototypes[c].unsqueeze(0).expand(batch_size, -1)
+                similarities[:, c] = self.hamming_dist(hypervectors, proto_expanded)
+        
+        max_sims, preds = torch.max(similarities, dim=1)
+        if similarity_thresh > 0:
+            preds[max_sims < similarity_thresh] = -1
+        
+        return preds, similarities
+    
+    def evaluate(self, features: torch.Tensor, labels: torch.Tensor) -> Tuple[float, float, torch.Tensor]:
+        predictions, similarities = self.predict(features, self.similarity_thresh)
+        
+        valid_mask = predictions != -1
+        if valid_mask.any():
+            valid_accuracy = (predictions[valid_mask] == labels[valid_mask]).float().mean().item()
+        else:
+            valid_accuracy = 0.0
+        
+        overall_accuracy = (predictions == labels).float().mean().item()
+        
+        correct_mask = predictions == labels
+        if correct_mask.any():
+            avg_similarity = similarities[correct_mask].max(dim=1)[0].mean().item()
+        else:
+            avg_similarity = 0.0
+        
+        confusion = torch.zeros(self.n_classes, self.n_classes, device=self.device)
+        for true, pred in zip(labels.cpu(), predictions.cpu()):
+            if pred >= 0:
+                confusion[true, pred] += 1
+        
+        return overall_accuracy, valid_accuracy, avg_similarity, confusion
 
 def main():
     pass
