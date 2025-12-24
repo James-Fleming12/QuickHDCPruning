@@ -6,6 +6,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
 from image_model import CNNExtractor, HDCImageClassifier
+from main import HDCPruner
 
 data_dir = "./data"
 cnn_path = "./models/cnn_fmnist.pth"
@@ -58,7 +59,9 @@ def train_fmnist():
 
     torch.save(hdc.state_dict(), hdc_path)
 
-    new_dim = hdc.hd_prune(train_loader)
+    pruner = HDCPruner(hdc)
+    new_dim = pruner.hd_prune(train_dataset)
+
     hdc = HDCImageClassifier(input_channels=1, hd_dim=new_dim)
     hdc.init_cnn(cnn_path)
 

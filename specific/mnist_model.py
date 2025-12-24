@@ -6,6 +6,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
 from image_model import CNNExtractor, HDCImageClassifier
+from main import HDCPruner
 
 data_dir = "./data"
 cnn_path = "./models/cnn_mnist.pth"
@@ -86,7 +87,9 @@ def prune_mnist():
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     
     old_dim = hdc.hd_dim
-    new_dim = hdc.hd_prune(train_loader)
+
+    pruner = HDCPruner(hdc)
+    new_dim = pruner.hd_prune(train_loader)
     print(f"Achieved new dimension {new_dim} from original {old_dim}")
 
     return new_dim
