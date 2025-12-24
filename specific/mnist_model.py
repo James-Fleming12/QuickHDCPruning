@@ -8,10 +8,10 @@ from torch.utils.data import Dataset, DataLoader
 from image_model import CNNExtractor, HDCImageClassifier
 from main import HDCPruner
 
-data_dir = "./data"
-cnn_path = "./models/cnn_mnist.pth"
-hdc_path = "./models/hdc_mnist.pth"
-new_hdc_path = "./models/hdc_mnist_pruned.pth"
+data_dir = "data"
+cnn_path = "models/cnn_mnist.pth"
+hdc_path = "models/hdc_mnist.pth"
+new_hdc_path = "models/hdc_mnist_pruned.pth"
 
 def train_mnist_cnn():
     learning_rate = 0.001

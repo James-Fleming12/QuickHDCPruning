@@ -402,18 +402,18 @@ def har_config(dataset_type: str = 'ucihar'):
     """Get configuration for HAR datasets."""
     if dataset_type == 'ucihar':
         return {
-            "data_path": "/data/ucihar",
-            "model_save_path": "/models/ucihar_feature_extractor.pth",
-            "hdc_save_path": "/models/ucihar_hdc.pth",
+            "data_path": "data/ucihar",
+            "model_save_path": "models/ucihar_feature_extractor.pth",
+            "hdc_save_path": "models/ucihar_hdc.pth",
             "batch_size": 32,
             "window_size": 2.5,
             "overlap": 0.5
         }
     elif dataset_type == 'pamap':
         return {
-            "data_path": "/data/pamap/Protocol.dat",
-            "model_save_path": "/models/pamap_feature_extractor.pth",
-            "hdc_save_path": "/models/pamap_hdc.pth",
+            "data_path": "data/pamap/Protocol.dat",
+            "model_save_path": "models/pamap_feature_extractor.pth",
+            "hdc_save_path": "models/pamap_hdc.pth",
             "batch_size": 32,
             "window_size": 2.5,
             "overlap": 0.5
@@ -523,8 +523,32 @@ def train_har_hdc(dataset_type: str = 'ucihar', dim: int = 5000):
     
     return hdc_model
 
+def prune_har(dataset_type: str = 'ucihar'):
+    config = har_config(dataset_type)()
+    data_path = config['data_path']
+    model_save_path = config['hdc_save_path']
+    batch_size = config['batch_size']
 
-def evaluate_har(hdc_model: HAR_HDC, dataset_type: str = 'ucihar'):
+    if dataset_type == 'ucihar':
+        train_dataset = UCIHARDataset(data_path, train=True)
+    elif dataset_type == 'pamap':
+        train_dataset = PAMAPDataset(data_path, train=True)
+    else:
+        raise ValueError(f"Unknown dataset type: {dataset_type}")
+    train_loader = DataLoader(train_dataset, batch_size=batch_size)
+
+    hdc = HAR_HDC(dataset_type=dataset_type)
+    hdc.load_state_dict(torch.load(model_save_path))
+
+    old_dim = hdc.hd_dim
+
+    pruner = HDCPruner(hdc)
+    new_dim = pruner.hd_prune(train_loader)
+    print(f"Achieved new dimension {new_dim} from original {old_dim}")
+
+    return new_dim
+
+def eval_har(hdc_model: HAR_HDC, dataset_type: str = 'ucihar'):
     """Evaluate HDC model."""
     config = har_config(dataset_type)
     data_path = config['data_path']

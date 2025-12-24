@@ -1,3 +1,4 @@
+import copy
 from typing import Tuple
 import torch
 import torch.nn as nn
@@ -5,8 +6,6 @@ import torch.optim as optim
 import torchvision
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-
-from image_model import CNNExtractor, HDCImageClassifier
 
 class HDCPruner(nn.Module):
     def __init__(self, model):
@@ -142,6 +141,187 @@ class HDCPruner(nn.Module):
                 low = mid + 1
 
         return res
+    
+class SimpleMicroHD:
+    def __init__(self, model_factory, original_model, target_accuracy=0.85):
+        """
+        Args:
+            model_factory: Function that creates a new model instance given a dimension
+                          e.g., lambda dim: HAR_HDC(dataset_type='ucihar', dim=dim)
+            original_model: The original trained model to use as reference
+            target_accuracy: Minimum acceptable accuracy (0-1)
+        """
+        self.model_factory = model_factory
+        self.original_model = original_model
+        self.target_accuracy = target_accuracy
+        self.device = original_model.device
+        
+    def _retrain_model(self, model, data_loader, epochs=5):
+        """
+        model needs
+        - feature_extractor attribute
+        - hdc attribute with features_to_hypervector, predict, evaluate methods
+        - train_hdc_iterative method OR we use standard iterative training
+        """
+        if hasattr(model, 'train_hdc_iterative'):
+            model.train_hdc_iterative(data_loader, n_iters=epochs)
+
+            all_features, all_labels = [], []
+            with torch.no_grad():
+                for batch_data, batch_labels in data_loader:
+                    batch_data = batch_data.to(self.device)
+                    features = model.feature_extractor(batch_data)
+                    all_features.append(features.cpu())
+                    all_labels.append(batch_labels)
+            
+            features_tensor = torch.cat(all_features, dim=0).to(self.device)
+            labels_tensor = torch.cat(all_labels, dim=0).to(self.device)
+            
+            overall_acc, _, _, _ = model.hdc.evaluate(features_tensor, labels_tensor)
+            return overall_acc
+            
+        else:
+            model.feature_extractor.eval()
+
+            all_features, all_labels = [], []
+            with torch.no_grad():
+                for batch_data, batch_labels in data_loader:
+                    batch_data = batch_data.to(self.device)
+                    features = model.feature_extractor(batch_data)
+                    all_features.append(features.cpu())
+                    all_labels.append(batch_labels)
+            
+            features_tensor = torch.cat(all_features, dim=0).to(self.device)
+            labels_tensor = torch.cat(all_labels, dim=0).to(self.device)
+
+            model.hdc.prototype_accum.zero_()
+            model.hdc.class_counts.zero_()
+            
+            hypervectors = model.hdc.features_to_hypervector(features_tensor)
+            hypervectors_signed = hypervectors.int() * 2 - 1
+
+            for i in range(len(labels_tensor)):
+                label = labels_tensor[i].item()
+                model.hdc.prototype_accum[label] += hypervectors_signed[i]
+                model.hdc.class_counts[label] += 1
+            model.hdc.finalize_prototypes()
+
+            for epoch in range(epochs):
+                predictions, _ = model.hdc.predict(features_tensor)
+                misclassified = predictions != labels_tensor
+                
+                for i in range(len(labels_tensor)):
+                    if misclassified[i]:
+                        true_label = labels_tensor[i].item()
+                        pred_label = predictions[i].item()
+                        hv = hypervectors_signed[i]
+                        
+                        model.hdc.prototype_accum[true_label] += hv
+                        model.hdc.class_counts[true_label] += 1
+                        
+                        if pred_label >= 0:
+                            model.hdc.prototype_accum[pred_label] -= hv
+                            model.hdc.class_counts[pred_label] += 1
+                
+                model.hdc.finalize_prototypes()
+
+            overall_acc, _, _, _ = model.hdc.evaluate(features_tensor, labels_tensor)
+            return overall_acc
+    
+    def _copy_feature_extractor(self, source_model, target_model):
+        """Copy feature extractor weights from source to target model."""
+        if hasattr(source_model, 'feature_extractor') and hasattr(target_model, 'feature_extractor'):
+            target_model.feature_extractor.load_state_dict(
+                copy.deepcopy(source_model.feature_extractor.state_dict())
+            )
+        
+        for attr_name in ['encoder', 'classifier', 'projector']:
+            if hasattr(source_model, attr_name) and hasattr(target_model, attr_name):
+                target_attr = getattr(target_model, attr_name)
+                source_attr = getattr(source_model, attr_name)
+                target_attr.load_state_dict(copy.deepcopy(source_attr.state_dict()))
+    
+    def _get_dimension_space(self, original_dim):
+        """Generate binary search-friendly dimension space."""
+        space = []
+        
+        min_exp = 6
+        max_exp = 14
+        
+        for exp in range(min_exp, max_exp + 1):
+            dim = 2 ** exp
+            space.append(dim)
+
+        if original_dim not in space:
+            space.append(original_dim)
+        
+        space.sort()
+        return space
+    
+    def hd_tune(self, data_loader, retrain_epochs=5):
+        """
+        Binary search for optimal dimension.
+        """
+        if hasattr(self.original_model, 'hd_dim'):
+            original_dim = self.original_model.hd_dim
+        elif hasattr(self.original_model, 'hdc') and hasattr(self.original_model.hdc, 'dimension'):
+            original_dim = self.original_model.hdc.dimension
+        else:
+            raise ValueError("Cannot determine original dimension from model")
+
+        dim_space = self._get_dimension_space(original_dim)
+
+        low = 0
+        high = len(dim_space) - 1
+        best_dim = original_dim
+
+        results_cache = {}
+        
+        while low <= high:
+            mid = (low + high) // 2
+            test_dim = dim_space[mid]
+            
+            if test_dim not in results_cache:
+                test_model = self.model_factory(test_dim)
+                test_model.to(self.device)
+                
+                self._copy_feature_extractor(self.original_model, test_model)
+
+                accuracy = self._retrain_model(test_model, data_loader, retrain_epochs)
+                results_cache[test_dim] = accuracy
+
+                del test_model
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            else:
+                accuracy = results_cache[test_dim]
+            
+            if accuracy >= self.target_accuracy and test_dim < best_dim:
+                best_dim = test_dim
+
+            if accuracy >= self.target_accuracy:
+                high = mid - 1
+            else:
+                low = mid + 1
+        
+        return best_dim
+
+def create_microhd(model_class, original_model, **constructor_kwargs):
+    def model_factory(dim):
+        model = model_class(dim=dim, **constructor_kwargs)
+
+        if hasattr(original_model, 'feature_extractor') and hasattr(model, 'feature_extractor'):
+            model.feature_extractor.load_state_dict(
+                original_model.feature_extractor.state_dict()
+            )
+        
+        return model
+    
+    return SimpleMicroHD(
+        model_factory=model_factory,
+        original_model=original_model
+    )
+
+
 
 class HDCClassifier(nn.Module):
     def __init__(self, n_classes: int, dimension: int = 5000, similarity_threshold: float = 0.0):

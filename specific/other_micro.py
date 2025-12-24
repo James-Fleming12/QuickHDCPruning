@@ -8,10 +8,10 @@ from torch.utils.data import Dataset, DataLoader
 from image_model import CNNExtractor, HDCImageClassifier
 from main import HDCPruner
 
-data_dir = "./data"
-cnn_path = "./models/cnn_fmnist.pth"
-hdc_path = "./models/hdc_fmnist.pth"
-new_hdc_path = "./models/hdc_fmnist_pruned.pth"
+data_dir = "data"
+cnn_path = "models/cnn_fmnist.pth"
+hdc_path = "models/hdc_fmnist.pth"
+new_hdc_path = "models/hdc_fmnist_pruned.pth"
 
 def train_fmnist():
     learning_rate = 0.001

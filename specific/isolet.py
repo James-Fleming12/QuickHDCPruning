@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import os
 
-from main import HDCClassifier, HDCPruner
+from main import HDCClassifier, HDCPruner, SimpleMicroHD, create_microhd
 
 class ISOLETDataset(Dataset):
     def __init__(self, data_path, train=True, transform=None):
@@ -31,7 +31,7 @@ class ISOLETDataset(Dataset):
         for filename in files_to_load:
             filepath = os.path.join(data_path, filename)
             if os.path.exists(filepath):
-                data = pd.read_csv(filepath, header=None, sep='\s+')
+                data = pd.read_csv(filepath, header=None, sep=r',\s+', engine='python')
 
                 X = data.iloc[:, :-1].values
                 y = data.iloc[:, -1].values
@@ -231,11 +231,11 @@ class ISOLET_HDC(nn.Module):
 
 def isolet_config():
     return {
-        "data_path": "/data/isolet",
-        "model_save_path": "/models/isolet_feature_extractor.pth",
+        "data_path": "data/isolet",
+        "model_save_path": "models/isolet_feature_extractor.pth",
         "batch_size": 16,
-        "hdc_save_path": "/models/isolet_hdc.pth",
-        "new_save_path": "/models/isolet_pruned.pth",
+        "hdc_save_path": "models/isolet_hdc.pth",
+        "new_save_path": "models/isolet_pruned.pth",
     }
 
 def train_isolet_extractor():
@@ -390,6 +390,31 @@ def prune_isolet():
     pruner = HDCPruner(hdc)
     new_dim = pruner.hd_prune(train_loader)
     print(f"Achieved new dimension {new_dim} from original {old_dim}")
+
+    return new_dim
+
+def micro_isolet():
+    config = isolet_config()
+    data_path = config['data_path']
+    model_save_path = config['hdc_save_path']
+    batch_size = config['batch_size']
+
+    try:
+        train_dataset = ISOLETDataset(data_path, train=True)
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
+        sys.exit(1)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size)
+
+    hdc = ISOLET_HDC()
+    hdc.load_state_dict(torch.load(model_save_path))
+
+    old_dim = hdc.hd_dim
+
+    tuner = create_microhd(ISOLET_HDC, hdc)
+    new_dim = tuner.hd_tune(train_loader)
+
+    print(f"MicroHD achieved new dimension {new_dim} from original {old_dim}")
 
     return new_dim
 
