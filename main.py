@@ -31,15 +31,22 @@ class HDCPruner(nn.Module):
 
     def prune_metrics(self, dim: int, data: DataLoader):
         """
-        returns diffs, svgs
+        returns diffs, avgs, var
         diffs[0] is average global distance, diffs[1-n_classes+1] are average label distances per class
         avgs[0-n_classes] are average hypervector per class
+        var[0] is global variance, var[1-n_classes+1] are per-label variances
         """
         device = self.device
         
         random_projection = (torch.randint(0, 2, (self.feature_dim, dim), device=device) * 2 - 1).float()
 
         hv_sums = torch.zeros(dim, device=device)
+        hv_sq_sums = torch.zeros(dim, device=device)
+
+        label_hv_sums = torch.zeros(self.n_classes, dim, device=device)
+        label_hv_sq_sums = torch.zeros(self.n_classes, dim, device=device)
+        label_counts = torch.zeros(self.n_classes, device=device)
+
         ones_count = torch.zeros(self.n_classes, dim, device=device)
         total_count = torch.zeros(self.n_classes, device=device)
         n = 0
@@ -52,12 +59,21 @@ class HDCPruner(nn.Module):
             batch_size = hvs.shape[0]
 
             hv_sums += hvs.sum(dim=0)
+            hv_sq_sums += (hvs**2).sum(dim=0)
+
+            for label_idx in range(self.n_classes):
+                mask = (labels == label_idx)
+                if mask.any():
+                    label_hvs = hvs[mask]
+                    label_hv_sums[label_idx] += label_hvs.sum(dim=0)
+                    label_hv_sq_sums[label_idx] += (label_hvs ** 2).sum(dim=0)
+                    label_counts[label_idx] += mask.sum()
+
             ones_count.index_add_(0, labels, hvs)
             total_count.index_add_(0, labels, torch.ones(batch_size, device=device))
             n += batch_size
 
-        hv_sums_sq = hv_sums.square()
-        total = (hv_sums_sq + (n - hv_sums).square()).sum()
+        total = (hv_sums.square() + (n - hv_sums).square()).sum()
         avg_sim = total / (n**2 * dim)
         avg_sim_tensor = torch.tensor([avg_sim], device=device)
 
@@ -83,7 +99,16 @@ class HDCPruner(nn.Module):
         if valid_mask.any():
             class_avgs[valid_mask] = ones_count[valid_mask] / total_count[valid_mask].unsqueeze(1)
 
-        return sims, class_avgs
+        var = torch.zeros(self.n_classes+1)
+        var[0] = ((hv_sq_sums / n) - (hv_sums / n) ** 2).mean()
+
+        for label_idx in range(self.n_classes):
+            if label_counts[label_idx] > 0:
+                label_mean = label_hv_sums[label_idx] / label_counts[label_idx]
+                label_mean_sq = label_hv_sq_sums[label_idx] / label_counts[label_idx]
+                var[label_idx + 1] = (label_mean_sq - label_mean ** 2).mean()
+
+        return sims, class_avgs, var
 
     def prune_metrics_subset(self, dim: int, data: DataLoader):
         """
@@ -115,7 +140,7 @@ class HDCPruner(nn.Module):
 
         features_dataloader = torch.utils.data.DataLoader(features_dataset, batch_size=data.batch_size, num_workers=0)
 
-        ref_diffs, ref_avgs = self.prune_metrics(self.hd_dim, features_dataloader)
+        # ref_diffs, ref_avgs = self.prune_metrics(self.hd_dim, features_dataloader)
 
         high = self.hd_dim
         low = 1
@@ -127,7 +152,7 @@ class HDCPruner(nn.Module):
             valid = True
             mid = low + (high - low) // 2
 
-            diffs, avgs = self.prune_metrics(mid, features_dataloader)
+            diffs, avgs, var = self.prune_metrics(mid, features_dataloader)
 
             for i in range(self.n_classes):
                 if diffs[i+1] < diffs[0]: # global distance comparisons (maybe include additional noise term?)
@@ -135,9 +160,12 @@ class HDCPruner(nn.Module):
 
                 for j in range(self.n_classes):
                     if i == j: continue
-                    if self.expected_hamming(avgs[i], avgs[j]) > diffs[i+1]:
+                    if self.expected_hamming(avgs[i], avgs[j]) / diffs[i+1] > 0.95:
                         valid = False
-                    
+
+                if var[i+1] / var[0] > 0.9: # global variance comparison
+                    valid = False
+
             if valid:
                 high = mid
                 if res > mid:

@@ -16,7 +16,7 @@ def isolet_pipeline():
     # train_isolet_hdc(5000, pruned=False)
     pruned_dim = prune_isolet()
     # micro_dim = micro_isolet()
-    hdc = train_isolet_hdc(pruned_dim, pruned=True)
+    # hdc = train_isolet_hdc(pruned_dim, pruned=True)
     # eval_isolet(hdc)
 
 def main():
