@@ -89,7 +89,7 @@ def prune_mnist():
     old_dim = hdc.hd_dim
 
     pruner = HDCPruner(hdc)
-    new_dim = pruner.hd_prune(train_loader)
+    new_dim, proj = pruner.hd_prune(train_loader)
     print(f"Achieved new dimension {new_dim} from original {old_dim}")
 
     return new_dim

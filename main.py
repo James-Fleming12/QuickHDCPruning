@@ -34,7 +34,7 @@ class HDCPruner(nn.Module):
         returns diffs, avgs, var
         diffs[0] is average global distance, diffs[1-n_classes+1] are average label distances per class
         avgs[0-n_classes] are average hypervector per class
-        var[0] is global variance, var[1-n_classes+1] are per-label variances
+        var[0] is global variance, var[1-n_classes+1] are per-label variances, var[n_classes+1] is the global variance explained
         """
         device = self.device
         
@@ -99,29 +99,24 @@ class HDCPruner(nn.Module):
         if valid_mask.any():
             class_avgs[valid_mask] = ones_count[valid_mask] / total_count[valid_mask].unsqueeze(1)
 
-        var = torch.zeros(self.n_classes+1)
+        var = torch.zeros(self.n_classes+2)
         var[0] = ((hv_sq_sums / n) - (hv_sums / n) ** 2).mean()
 
+        weighted_within_var = 0.0
         for label_idx in range(self.n_classes):
             if label_counts[label_idx] > 0:
                 label_mean = label_hv_sums[label_idx] / label_counts[label_idx]
                 label_mean_sq = label_hv_sq_sums[label_idx] / label_counts[label_idx]
                 var[label_idx + 1] = (label_mean_sq - label_mean ** 2).mean()
 
-        return sims, class_avgs, var
+                weighted_within_var += var[label_idx + 1] * label_counts[label_idx]
+        
+        weighted_within_var /= n
+        variance_explained = (var[0] - weighted_within_var) / var[0]
 
-    def prune_metrics_subset(self, dim: int, data: DataLoader):
-        """
-        Same as prune_metrics, but breaks up computations as to not hold too much data in memory.
-        TODO: finish
-        """
-        hv_sums = torch.Tensor(dim)
-        n = len(data)
-        for (inputs, labels) in data:
-            hvs = self.model.hdc.features_to_hypervector(inputs)
-            hv_sums += hvs.sum(dim=0)
-        total = (hv_sums**2 + (n-hv_sums**2)).sum()
-        return total / (n**2 * dim)
+        var[-1] = variance_explained
+
+        return sims, class_avgs, var, random_projection
 
     def hd_prune(self, data: DataLoader) -> int:
         all_features = []
@@ -147,33 +142,40 @@ class HDCPruner(nn.Module):
         res = self.hd_dim
 
         error_term = 0.8
+        proj = None
 
         while high > low:
             valid = True
             mid = low + (high - low) // 2
 
-            diffs, avgs, var = self.prune_metrics(mid, features_dataloader)
+            diffs, avgs, var, random_projection = self.prune_metrics(mid, features_dataloader)
+
+            if var[-1] < 0.4: # variance explained test
+                valid = False
 
             for i in range(self.n_classes):
-                if diffs[i+1] < diffs[0]: # global distance comparisons (maybe include additional noise term?)
+                if diffs[i+1] / diffs[0] < 0.7: # global distance comparisons (maybe include additional noise term?)
                     valid = False
 
                 for j in range(self.n_classes):
                     if i == j: continue
-                    if self.expected_hamming(avgs[i], avgs[j]) / diffs[i+1] > 0.95:
+                    if diffs[i+1] / self.expected_hamming(avgs[i], avgs[j]) < 0.5:
+                        valid = False
+                    if self.expected_hamming(avgs[i], avgs[j]) / diffs[i+1] > 2:
                         valid = False
 
-                if var[i+1] / var[0] > 0.9: # global variance comparison
+                if var[i+1] / var[0] > 0.7: # global variance comparison
                     valid = False
 
             if valid:
                 high = mid
+                proj = random_projection
                 if res > mid:
                     res = mid
             else:
                 low = mid + 1
 
-        return res
+        return res, proj
     
     def expected_hamming(self, p, q):
         dim = p.shape[0]

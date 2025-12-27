@@ -312,7 +312,7 @@ def train_isolet_extractor():
             torch.save(model.state_dict(), model_save_path)
             print(f'Best model saved with val loss {val_loss:.4f}')
 
-def train_isolet_hdc(dim: int, pruned: bool = False) -> ISOLET_HDC:
+def train_isolet_hdc(dim: int, pruned: bool = False, random_projection=None) -> ISOLET_HDC:
     config = isolet_config()
     data_path = config['data_path']
     model_save_path = config['model_save_path']
@@ -329,6 +329,9 @@ def train_isolet_hdc(dim: int, pruned: bool = False) -> ISOLET_HDC:
 
     hdc = ISOLET_HDC(dim=dim)
     hdc.init_feature_extractor(model_save_path)
+
+    if random_projection is not None:
+        hdc.hdc.random_projection = random_projection
 
     accs = hdc.train_hdc_iterative(train_loader)
 
@@ -388,10 +391,10 @@ def prune_isolet():
     old_dim = hdc.hd_dim
 
     pruner = HDCPruner(hdc)
-    new_dim = pruner.hd_prune(train_loader)
+    new_dim, proj = pruner.hd_prune(train_loader)
     print(f"Achieved new dimension {new_dim} from original {old_dim}")
 
-    return new_dim
+    return new_dim, proj
 
 def micro_isolet():
     config = isolet_config()

@@ -60,7 +60,7 @@ def train_fmnist():
     torch.save(hdc.state_dict(), hdc_path)
 
     pruner = HDCPruner(hdc)
-    new_dim = pruner.hd_prune(train_dataset)
+    new_dim, proj = pruner.hd_prune(train_dataset)
 
     hdc = HDCImageClassifier(input_channels=1, hd_dim=new_dim)
     hdc.init_cnn(cnn_path)
