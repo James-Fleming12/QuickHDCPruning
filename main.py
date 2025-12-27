@@ -7,6 +7,8 @@ import torchvision
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
+from torch.linalg import norm
+
 class HDCPruner(nn.Module):
     def __init__(self, model):
         """
@@ -79,8 +81,8 @@ class HDCPruner(nn.Module):
 
         class_avgs = torch.zeros(self.n_classes, dim, device=device)
         if valid_mask.any():
-            class_avgs[valid_mask] = (ones_count[valid_mask] > (total_count[valid_mask].unsqueeze(1) / 2)).float()
-        
+            class_avgs[valid_mask] = ones_count[valid_mask] / total_count[valid_mask].unsqueeze(1)
+
         return sims, class_avgs
 
     def prune_metrics_subset(self, dim: int, data: DataLoader):
@@ -118,6 +120,9 @@ class HDCPruner(nn.Module):
         high = self.hd_dim
         low = 1
         res = self.hd_dim
+
+        error_term = 0.8
+
         while high > low:
             valid = True
             mid = low + (high - low) // 2
@@ -130,9 +135,9 @@ class HDCPruner(nn.Module):
 
                 for j in range(self.n_classes):
                     if i == j: continue
-                    if self.model.hdc.hamming_dist(avgs[i].to(torch.bool), avgs[j].to(torch.bool)) > diffs[i+1]:
+                    if self.expected_hamming(avgs[i], avgs[j]) > diffs[i+1]:
                         valid = False
-
+                    
             if valid:
                 high = mid
                 if res > mid:
@@ -142,6 +147,11 @@ class HDCPruner(nn.Module):
 
         return res
     
+    def expected_hamming(self, p, q):
+        dim = p.shape[0]
+        hamming = (p + q - 2*p*q).sum()
+        return 1 - (hamming / dim)
+
 class SimpleMicroHD:
     def __init__(self, model_factory, original_model, target_accuracy=0.85):
         """
