@@ -1,5 +1,6 @@
 import copy
 from typing import Tuple
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +9,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
 from torch.linalg import norm
+from matrices import create_database_friendly_matrix, create_gaussian_orthogonal_matrix, create_jl_gaussian_matrix, create_orthogonal_gaussian_mix, create_sparse_random_matrix, create_very_sparse_matrix
 
 class HDCPruner(nn.Module):
     def __init__(self, model):
@@ -37,8 +39,9 @@ class HDCPruner(nn.Module):
         var[0] is global variance, var[1-n_classes+1] are per-label variances, var[n_classes+1] is the global variance explained
         """
         device = self.device
-        
-        random_projection = (torch.randint(0, 2, (self.feature_dim, dim), device=device) * 2 - 1).float()
+
+        random_projection = create_gaussian_orthogonal_matrix(self.feature_dim, dim, device=device)
+        # random_projection = (torch.randint(0, 2, (self.feature_dim, dim), device=device) * 2 - 1).float()
 
         hv_sums = torch.zeros(dim, device=device)
         hv_sq_sums = torch.zeros(dim, device=device)

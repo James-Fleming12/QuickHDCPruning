@@ -3,6 +3,8 @@ from specific.isolet import train_isolet_extractor, train_isolet_hdc, prune_isol
 from specific.sensor_model import train_har_extractor, train_har_hdc, prune_har, eval_har
 from specific.other_micro import train_fmnist
 
+import statistics
+
 def mnist_pipeline():
     # train_mnist_cnn()
     # train_mnist_hdc(5000, pruned=False)
@@ -14,10 +16,12 @@ def mnist_pipeline():
 def isolet_pipeline():
     # train_isolet_extractor()
     # train_isolet_hdc(5000, pruned=False)
+
     pruned_dim, proj = prune_isolet()
+
     # micro_dim = micro_isolet()
-    hdc = train_isolet_hdc(pruned_dim, pruned=True)
-    eval_isolet(hdc)
+    # hdc = train_isolet_hdc(pruned_dim, pruned=True)
+    # eval_isolet(hdc)
 
 def main():
     # mnist_pipeline()
