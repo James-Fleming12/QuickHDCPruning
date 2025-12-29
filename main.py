@@ -9,7 +9,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
 from torch.linalg import norm
-from matrices import create_database_friendly_matrix, create_gaussian_orthogonal_matrix, create_jl_gaussian_matrix, create_orthogonal_gaussian_mix, create_sparse_random_matrix, create_very_sparse_matrix
+from matrices import create_class_separating_projection, create_gaussian_orthogonal_matrix, create_optimal_feature_set, create_data_aware_orthogonal_matrix
 
 class HDCPruner(nn.Module):
     def __init__(self, model):
@@ -31,7 +31,7 @@ class HDCPruner(nn.Module):
         self.feature_dim = model.feature_dim
         self.hd_dim = model.hd_dim
 
-    def prune_metrics(self, dim: int, data: DataLoader):
+    def prune_metrics(self, dim: int, data: DataLoader, random_projection = None):
         """
         returns diffs, avgs, var
         diffs[0] is average global distance, diffs[1-n_classes+1] are average label distances per class
@@ -40,8 +40,9 @@ class HDCPruner(nn.Module):
         """
         device = self.device
 
-        random_projection = create_gaussian_orthogonal_matrix(self.feature_dim, dim, device=device)
-        # random_projection = (torch.randint(0, 2, (self.feature_dim, dim), device=device) * 2 - 1).float()
+        if random_projection is None:
+            random_projection = create_gaussian_orthogonal_matrix(self.feature_dim, dim, device=device)
+            # random_projection = (torch.randint(0, 2, (self.feature_dim, dim), device=device) * 2 - 1).float()
 
         hv_sums = torch.zeros(dim, device=device)
         hv_sq_sums = torch.zeros(dim, device=device)
