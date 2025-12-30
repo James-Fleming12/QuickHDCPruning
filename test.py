@@ -17,9 +17,10 @@ def isolet_pipeline():
     # train_isolet_extractor()
     # train_isolet_hdc(5000, pruned=False)
 
-    pruned_dim, proj = prune_isolet()
+    # pruned_dim, proj = prune_isolet()
 
-    # micro_dim = micro_isolet()
+    micro_dim = micro_isolet()
+
     # hdc = train_isolet_hdc(pruned_dim, pruned=True)
     # eval_isolet(hdc)
 

@@ -55,7 +55,7 @@ class HDCPruner(nn.Module):
         total_count = torch.zeros(self.n_classes, device=device)
         n = 0
 
-        for features, labels in data:
+        for i, (features, labels) in enumerate(data):
             features, labels = features.to(device), labels.to(device)
 
             projected = features @ random_projection
@@ -119,6 +119,37 @@ class HDCPruner(nn.Module):
         variance_explained = (var[0] - weighted_within_var) / var[0]
 
         var[-1] = variance_explained
+
+        segmentation_scores = torch.zeros(self.n_classes, device=device)
+    
+        for i in range(self.n_classes):
+            if label_counts[i] > 50:
+                bit_freqs = ones_count[i] / total_count[i]
+                
+                near_0 = (bit_freqs < 0.2).sum().float()
+                near_1 = (bit_freqs > 0.8).sum().float()
+                near_mid = ((bit_freqs >= 0.4) & (bit_freqs <= 0.6)).sum().float()
+
+                total_bits = dim
+                bimodal_score = (near_0 + near_1) / total_bits
+                split_score = near_mid / total_bits
+
+                expected_var_if_uniform = 0.25
+                bit_vars = bit_freqs * (1 - bit_freqs)
+                avg_bit_var = bit_vars.mean()
+
+                mean_vector = (label_hv_sums[i] / label_counts[i]) > 0.5
+                mean_distance = ((ones_count[i] > total_count[i]/2) != mean_vector).sum().float() / dim
+
+                if split_score > 0.3:
+                    segmentation_scores[i] += 0.4
+                if avg_bit_var > 0.2:
+                    segmentation_scores[i] += 0.3
+                if 0.3 < mean_distance < 0.7:
+                    segmentation_scores[i] += 0.3
+
+                if var[i+1] > 0.4 and bimodal_score < 0.6:
+                    segmentation_scores[i] = max(segmentation_scores[i], 0.8)
 
         return sims, class_avgs, var, random_projection
 
@@ -189,11 +220,9 @@ class HDCPruner(nn.Module):
 class SimpleMicroHD:
     def __init__(self, model_factory, original_model, target_accuracy=0.85):
         """
-        Args:
-            model_factory: Function that creates a new model instance given a dimension
-                          e.g., lambda dim: HAR_HDC(dataset_type='ucihar', dim=dim)
-            original_model: The original trained model to use as reference
-            target_accuracy: Minimum acceptable accuracy (0-1)
+        model_factory: Function that creates a new model instance given a dimension e.g., lambda dim: HAR_HDC(dataset_type='ucihar', dim=dim)
+        original_model: The original trained model to use as reference
+        target_accuracy: Minimum acceptable accuracy (0-1)
         """
         self.model_factory = model_factory
         self.original_model = original_model
