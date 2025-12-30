@@ -55,7 +55,7 @@ class HDCPruner(nn.Module):
         total_count = torch.zeros(self.n_classes, device=device)
         n = 0
 
-        for i, (features, labels) in enumerate(data):
+        for features, labels in data:
             features, labels = features.to(device), labels.to(device)
 
             projected = features @ random_projection
@@ -120,37 +120,6 @@ class HDCPruner(nn.Module):
 
         var[-1] = variance_explained
 
-        segmentation_scores = torch.zeros(self.n_classes, device=device)
-    
-        for i in range(self.n_classes):
-            if label_counts[i] > 50:
-                bit_freqs = ones_count[i] / total_count[i]
-                
-                near_0 = (bit_freqs < 0.2).sum().float()
-                near_1 = (bit_freqs > 0.8).sum().float()
-                near_mid = ((bit_freqs >= 0.4) & (bit_freqs <= 0.6)).sum().float()
-
-                total_bits = dim
-                bimodal_score = (near_0 + near_1) / total_bits
-                split_score = near_mid / total_bits
-
-                expected_var_if_uniform = 0.25
-                bit_vars = bit_freqs * (1 - bit_freqs)
-                avg_bit_var = bit_vars.mean()
-
-                mean_vector = (label_hv_sums[i] / label_counts[i]) > 0.5
-                mean_distance = ((ones_count[i] > total_count[i]/2) != mean_vector).sum().float() / dim
-
-                if split_score > 0.3:
-                    segmentation_scores[i] += 0.4
-                if avg_bit_var > 0.2:
-                    segmentation_scores[i] += 0.3
-                if 0.3 < mean_distance < 0.7:
-                    segmentation_scores[i] += 0.3
-
-                if var[i+1] > 0.4 and bimodal_score < 0.6:
-                    segmentation_scores[i] = max(segmentation_scores[i], 0.8)
-
         return sims, class_avgs, var, random_projection
 
     def hd_prune(self, data: DataLoader) -> int:
@@ -170,7 +139,9 @@ class HDCPruner(nn.Module):
 
         features_dataloader = torch.utils.data.DataLoader(features_dataset, batch_size=data.batch_size, num_workers=0)
 
-        # ref_diffs, ref_avgs = self.prune_metrics(self.hd_dim, features_dataloader)
+        proj_mat = create_gaussian_orthogonal_matrix(self.feature_dim, self.hd_dim, device=self.device)
+
+        # ref_diffs, ref_avgs, ref_var, _ = self.prune_metrics(self.hd_dim, features_dataloader)
 
         high = self.hd_dim
         low = 1
@@ -183,7 +154,7 @@ class HDCPruner(nn.Module):
             valid = True
             mid = low + (high - low) // 2
 
-            diffs, avgs, var, random_projection = self.prune_metrics(mid, features_dataloader)
+            diffs, avgs, var, random_projection = self.prune_metrics(mid, features_dataloader, random_projection=proj_mat[:, :mid])
 
             if var[-1] < 0.4: # variance explained test
                 valid = False

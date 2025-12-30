@@ -1,3 +1,4 @@
+import torch
 from specific.mnist_model import train_mnist_cnn, train_mnist_hdc, prune_mnist, eval_mnist
 from specific.isolet import train_isolet_extractor, train_isolet_hdc, prune_isolet, eval_isolet, micro_isolet
 from specific.sensor_model import train_har_extractor, train_har_hdc, prune_har, eval_har
@@ -17,9 +18,9 @@ def isolet_pipeline():
     # train_isolet_extractor()
     # train_isolet_hdc(5000, pruned=False)
 
-    # pruned_dim, proj = prune_isolet()
-
-    micro_dim = micro_isolet()
+    pruned_dim, proj = prune_isolet()
+    
+    # micro_dim = micro_isolet()
 
     # hdc = train_isolet_hdc(pruned_dim, pruned=True)
     # eval_isolet(hdc)
